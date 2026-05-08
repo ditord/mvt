@@ -28,3 +28,21 @@ mvt-ios check-fs /path/to/filesystem/dump/ --output /path/to/output/
 This command will create a few JSON files containing the results from the extraction. If you do not specify a `--output` option, `mvt-ios` will just process the data without storing results on disk.
 
 Through the `--iocs` argument you can specify a [STIX2](https://oasis-open.github.io/cti-documentation/stix/intro) file defining a list of malicious indicators to check against the records extracted from the backup by mvt. Any matches will be highlighted in the terminal output as well as saved in the output folder using a "*_detected*" suffix to the JSON file name.
+
+## FSEvents analysis
+
+A full filesystem dump is the only acquisition type that preserves the `.fseventsd` directory, which contains the device's FSEvents log files. These logs are parsed automatically by `check-fs` and the results stored in `fsevents.json`.
+
+To run only the FSEvents module against a dump, use the `--module` flag:
+
+```bash
+mvt-ios check-fs --module FSEvents --output /path/to/output/ /path/to/filesystem/dump/
+```
+
+To check the extracted FSEvents records against a set of IOCs:
+
+```bash
+mvt-ios check-fs --iocs /path/to/indicators.stix2 --output /path/to/output/ /path/to/filesystem/dump/
+```
+
+Any file system paths recorded in the FSEvents logs that match a known malicious indicator will be saved to `fsevents_detected.json` and highlighted in the terminal output. Use `--fast` to skip the process-name component of the path check if analysis time is a concern.

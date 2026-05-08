@@ -142,6 +142,36 @@ If indicators are provided through the command-line, they are checked against th
 
 ---
 
+### `fsevents.json`
+
+!!! info "Availability"
+    Backup: :material-close:
+    Full filesystem dump: :material-check:
+
+This JSON file is created by mvt-ios' `FSEvents` module. The module parses binary FSEvents log files found inside the `.fseventsd` directory of a full filesystem dump. FSEvents is an iOS and macOS kernel subsystem that continuously records file system activity — file creation, deletion, renaming, modification, and ownership changes — across the entire device storage. Because these logs are written at the kernel level and are difficult to suppress from user space, they represent a reliable record of file activity and can reveal artefacts left by spyware that would not appear in other data sources.
+
+Each `.fseventsd` log file is a gzip-compressed binary stream of fixed-format pages. Each page contains variable-length records holding the iOS file system path that was affected, a monotonically increasing event ID, and a bitmask of event type flags (e.g. `Created`, `Removed`, `Renamed`, `IsFile`, `IsDir`). The module searches for `.fseventsd` directories anywhere within the dump, parses both the DLS1 (without inode) and DLS2 (with inode) record formats, and decodes all known event flags into human-readable names. Unknown flag bits are preserved in hexadecimal so no information is lost.
+
+!!! warning "Timestamp limitation"
+    FSEvents records do not contain embedded timestamps. The `timestamp` field in each result is derived from the modification time of the containing log file and should be treated as an approximation of when the events in that file were recorded, not as a precise per-event time.
+
+Each result record in `fsevents.json` contains the following fields:
+
+```json
+{
+    "timestamp": "2024-01-15 10:23:41.000000",
+    "event_id": 1099511628032,
+    "path": "/private/var/mobile/Containers/Data/Application/ABCD1234/Library/Caches/payload",
+    "flags_raw": 67072,
+    "flags_decoded": ["Created", "IsFile"],
+    "source_log_file": ".fseventsd/000000004200e000"
+}
+```
+
+If indicators are provided through the command-line, the iOS file system path recorded in each event is checked against known malicious file names, file paths, and process names. Any matches are stored in *fsevents_detected.json*. Enabling `--fast` skips the process-name check, which can reduce analysis time on large dumps.
+
+---
+
 ### `global_preferences.json`
 
 !!! info "Availability"

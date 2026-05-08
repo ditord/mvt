@@ -7,6 +7,7 @@ from .analytics import Analytics
 from .analytics_ios_versions import AnalyticsIOSVersions
 from .cache_files import CacheFiles
 from .filesystem import Filesystem
+from .fsevents import FSEvents
 from .net_netusage import Netusage
 from .safari_favicon import SafariFavicon
 from .shutdownlog import ShutdownLog
@@ -18,6 +19,7 @@ from .webkit_safariviewservice import WebkitSafariViewService
 FS_MODULES = [
     CacheFiles,
     Filesystem,
+    FSEvents,
     Netusage,
     Analytics,
     AnalyticsIOSVersions,
