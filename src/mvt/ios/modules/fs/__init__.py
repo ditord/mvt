@@ -15,6 +15,7 @@ from .version_history import IOSVersionHistory
 from .webkit_indexeddb import WebkitIndexedDB
 from .webkit_localstorage import WebkitLocalStorage
 from .webkit_safariviewservice import WebkitSafariViewService
+from .xattr_metadata import XattrMetadata
 
 FS_MODULES = [
     CacheFiles,
@@ -29,4 +30,5 @@ FS_MODULES = [
     WebkitIndexedDB,
     WebkitLocalStorage,
     WebkitSafariViewService,
+    XattrMetadata,
 ]

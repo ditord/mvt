@@ -442,3 +442,37 @@ This JSON file is created by mvt-ios' `WhatsApp` module. The module extracts a l
 
 If indicators are provided through the command-line, they are checked against the extracted HTTP links. Any matches are stored in *whatsapp_detected.json*.
 
+---
+
+### `xattr_metadata.json`
+
+!!! info "Availability"
+    Backup: :material-close:
+    Full filesystem dump: :material-check: (Linux/macOS only)
+
+This JSON file is created by mvt-ios' `XattrMetadata` module. The module reads POSIX extended attributes (xattrs) from every file in a full filesystem dump, focusing on attributes that record download provenance:
+
+- **`com.apple.quarantine`** — set by macOS Gatekeeper on downloaded files; contains the downloading application and a GUID.
+- **`com.apple.metadata:kMDItemWhereFroms`** — a binary plist array of URLs recording where the file was downloaded from (referrer and direct URL).
+- **`com.apple.metadata:kMDItemDownloadedDate`** — a binary plist date recording when the file was downloaded.
+- Any other **`com.apple.metadata:*`** attributes present on the file.
+
+Each record in `xattr_metadata.json` contains the following fields:
+
+```json
+{
+    "file_path": "private/var/mobile/Downloads/payload.dmg",
+    "attribute_name": "com.apple.metadata:kMDItemWhereFroms",
+    "raw_value": "62706c6973743030...",
+    "decoded_value": ["https://evil.example.org/payload.dmg", "https://evil.example.org/"],
+    "extracted_urls": ["https://evil.example.org/payload.dmg", "https://evil.example.org/"],
+    "extracted_domains": ["evil.example.org"],
+    "isodate": "2024-01-15 10:23:41.000000"
+}
+```
+
+!!! note "Platform requirement"
+    Reading xattrs requires `os.listxattr` / `os.getxattr`, which are available on Linux and macOS but not on Windows. On unsupported platforms the module logs a warning and produces no output.
+
+If indicators are provided through the command-line, extracted URLs (and their domains) are checked against network IOCs. Any matches are stored in *xattr_metadata_detected.json*.
+
