@@ -13,11 +13,12 @@ output.
 
 ## Supported modules
 
-| Module | Slug | Artifact type |
-|---|---|---|
-| `FSEvents` | `fsevents` | `fsevent` |
-| `XattrMetadata` | `xattr_metadata` | `xattr` |
-| `CrashReports` | `crash_reports` | `crash_report` |
+| Module | Slug | Artifact type | Notes |
+|---|---|---|---|
+| `FSEvents` | `fsevents` | `fsevent` | |
+| `XattrMetadata` | `xattr_metadata` | `xattr` | |
+| `CrashReports` | `crash_reports` | `crash_report` | |
+| `UnifiedLog` | `unified_log` | `unified_log` | macOS only (prototype) |
 
 ---
 

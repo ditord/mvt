@@ -4,7 +4,9 @@
 #   https://license.mvt.re/1.1/
 
 from .crash_reports import CrashReports
+from .unified_log import UnifiedLog
 
 SYSDIAGNOSE_MODULES = [
     CrashReports,
+    UnifiedLog,
 ]
