@@ -18,6 +18,8 @@ from mvt.ios.modules.fs.xattr_metadata import (
     _to_serializable,
 )
 
+_XATTR_MODULE = "mvt.ios.modules.fs.xattr_metadata"
+
 
 class TestXattrHelpers:
     def test_get_domain_full_url(self):
@@ -190,22 +192,15 @@ class TestXattrMetadataCheckIndicators:
 
 
 class TestXattrMetadataRun:
-    @pytest.mark.skipif(
-        hasattr(__import__("os"), "listxattr"),
-        reason="listxattr is available; this test covers the unsupported-platform path",
-    )
     def test_run_skips_on_no_listxattr(self, tmp_path, caplog):
-        """On platforms without os.listxattr the module logs a warning and exits."""
-        m = XattrMetadata(target_path=str(tmp_path))
-        with caplog.at_level(logging.WARNING):
-            m.run()
+        """When xattr support is unavailable the module logs a warning and exits."""
+        with patch(f"{_XATTR_MODULE}._HAS_XATTR", False):
+            m = XattrMetadata(target_path=str(tmp_path))
+            with caplog.at_level(logging.WARNING):
+                m.run()
         assert len(m.results) == 0
         assert any("not supported" in r.message for r in caplog.records)
 
-    @pytest.mark.skipif(
-        not hasattr(__import__("os"), "listxattr"),
-        reason="xattrs not supported on this platform",
-    )
     def test_run_processes_files(self, tmp_path):
         """Files with matching xattrs are processed; others are skipped."""
         test_file = tmp_path / "test.dmg"
@@ -217,8 +212,9 @@ class TestXattrMetadataRun:
         )
 
         with (
-            patch("os.listxattr", return_value=["com.apple.metadata:kMDItemWhereFroms"]),
-            patch("os.getxattr", return_value=where_froms),
+            patch(f"{_XATTR_MODULE}._HAS_XATTR", True),
+            patch("os.listxattr", create=True, return_value=["com.apple.metadata:kMDItemWhereFroms"]),
+            patch("os.getxattr", create=True, return_value=where_froms),
         ):
             m = XattrMetadata(target_path=str(tmp_path))
             m.run()
@@ -229,28 +225,21 @@ class TestXattrMetadataRun:
         assert "https://example.org/test.dmg" in result["extracted_urls"]
         assert "example.org" in result["extracted_domains"]
 
-    @pytest.mark.skipif(
-        not hasattr(__import__("os"), "listxattr"),
-        reason="xattrs not supported on this platform",
-    )
     def test_run_skips_non_apple_xattrs(self, tmp_path):
         """Non-apple xattrs are ignored."""
         test_file = tmp_path / "file.txt"
         test_file.write_bytes(b"hello")
 
         with (
-            patch("os.listxattr", return_value=["user.custom", "security.selinux"]),
-            patch("os.getxattr", return_value=b"value"),
+            patch(f"{_XATTR_MODULE}._HAS_XATTR", True),
+            patch("os.listxattr", create=True, return_value=["user.custom", "security.selinux"]),
+            patch("os.getxattr", create=True, return_value=b"value"),
         ):
             m = XattrMetadata(target_path=str(tmp_path))
             m.run()
 
         assert len(m.results) == 0
 
-    @pytest.mark.skipif(
-        not hasattr(__import__("os"), "listxattr"),
-        reason="xattrs not supported on this platform",
-    )
     def test_run_multiple_attributes(self, tmp_path):
         """Multiple relevant xattrs on one file each produce a result."""
         test_file = tmp_path / "app.pkg"
@@ -274,8 +263,9 @@ class TestXattrMetadataRun:
             return where_froms
 
         with (
-            patch("os.listxattr", side_effect=fake_listxattr),
-            patch("os.getxattr", side_effect=fake_getxattr),
+            patch(f"{_XATTR_MODULE}._HAS_XATTR", True),
+            patch("os.listxattr", create=True, side_effect=fake_listxattr),
+            patch("os.getxattr", create=True, side_effect=fake_getxattr),
         ):
             m = XattrMetadata(target_path=str(tmp_path))
             m.run()

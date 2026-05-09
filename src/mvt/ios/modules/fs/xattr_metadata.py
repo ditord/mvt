@@ -24,6 +24,8 @@ from ..base import IOSExtraction
 _XATTR_QUARANTINE = "com.apple.quarantine"
 _XATTR_METADATA_PREFIX = "com.apple.metadata:"
 
+_HAS_XATTR = hasattr(os, "listxattr") and hasattr(os, "getxattr")
+
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 
 
@@ -60,7 +62,10 @@ def _extract_urls(value: object) -> List[str]:
 def _get_domain(url: str) -> str:
     try:
         netloc = urlparse(url).netloc
-        return netloc.lstrip("www.").lower() if netloc else ""
+        if not netloc:
+            return ""
+        domain = netloc[4:] if netloc.startswith("www.") else netloc
+        return domain.lower()
     except Exception:
         return ""
 
@@ -168,7 +173,7 @@ class XattrMetadata(NormalizedTimelineMixin, IOSExtraction):
             return
 
         try:
-            mtime = convert_unix_to_iso(os.stat(file_path).st_mtime)
+            mtime = convert_unix_to_iso(os.lstat(file_path).st_mtime)
         except Exception:
             mtime = ""
 
@@ -204,7 +209,7 @@ class XattrMetadata(NormalizedTimelineMixin, IOSExtraction):
             self.log.error("No target path provided for %s", self.__class__.__name__)
             return
 
-        if not hasattr(os, "listxattr"):
+        if not _HAS_XATTR:
             self.log.warning(
                 "Extended attributes (xattrs) are not supported on this platform; "
                 "skipping %s",
@@ -214,7 +219,10 @@ class XattrMetadata(NormalizedTimelineMixin, IOSExtraction):
 
         for root, _dirs, files in os.walk(self.target_path):
             for file_name in files:
-                self._process_file(os.path.join(root, file_name))
+                file_path = os.path.join(root, file_name)
+                if os.path.islink(file_path):
+                    continue
+                self._process_file(file_path)
 
         self.log.info(
             "Extracted %d xattr metadata record(s) from filesystem dump",
