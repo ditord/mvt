@@ -44,43 +44,61 @@ def _r(**kwargs) -> NormalizedTimelineRecord:
     return NormalizedTimelineRecord(**defaults)
 
 
-# Shared fixtures used across multiple test classes
+# Shared test constants
 _DOM = "evil.example.org"
 _URL = "https://evil.example.org/payload.dmg"
 _PATH = "/private/var/mobile/Downloads/payload.dmg"
 
-_XATTR_REC = _r(
-    timestamp="2024-01-15 10:23:45.000000",
-    module="XattrMetadata",
-    artifact_type="xattr",
-    path="private/var/mobile/Downloads/payload.dmg",
-    domain=_DOM,
-    url=_URL,
-    matched_ioc=_DOM,
-    source_file="private/var/mobile/Downloads/payload.dmg",
-)
 
-_CRASH_REC = _r(
-    timestamp="2024-01-15 10:05:00.000000",
-    module="CrashReports",
-    artifact_type="crash_report",
-    path="/System/Library/CoreServices/SpringBoard.app/SpringBoard",
-    process="SpringBoard",
-    bundle_id="com.apple.springboard",
-    domain=_DOM,
-    url=_URL,
-    matched_ioc=_DOM,
-    source_file="DiagnosticLogs/CrashReporter/sb.ips",
-)
+# Use factories instead of module-level mutable instances to prevent one test
+# from silently corrupting shared state for subsequent tests.
+def _xattr_rec(**overrides) -> NormalizedTimelineRecord:
+    return _r(
+        timestamp="2024-01-15 10:23:45.000000",
+        module="XattrMetadata",
+        artifact_type="xattr",
+        path="private/var/mobile/Downloads/payload.dmg",
+        domain=_DOM,
+        url=_URL,
+        matched_ioc=_DOM,
+        source_file="private/var/mobile/Downloads/payload.dmg",
+        **overrides,
+    )
 
-_FSEVENT_REC = _r(
-    timestamp="2024-01-15 10:10:00.000000",
-    module="FSEvents",
-    artifact_type="fsevent",
-    path=_PATH,
-    event_type="Created, IsFile",
-    source_file=".fseventsd/000000004200e000",
-)
+
+def _crash_rec(**overrides) -> NormalizedTimelineRecord:
+    return _r(
+        timestamp="2024-01-15 10:05:00.000000",
+        module="CrashReports",
+        artifact_type="crash_report",
+        path="/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+        process="SpringBoard",
+        bundle_id="com.apple.springboard",
+        domain=_DOM,
+        url=_URL,
+        matched_ioc=_DOM,
+        source_file="DiagnosticLogs/CrashReporter/sb.ips",
+        **overrides,
+    )
+
+
+def _fsevent_rec(**overrides) -> NormalizedTimelineRecord:
+    return _r(
+        timestamp="2024-01-15 10:10:00.000000",
+        module="FSEvents",
+        artifact_type="fsevent",
+        path=_PATH,
+        event_type="Created, IsFile",
+        source_file=".fseventsd/000000004200e000",
+        **overrides,
+    )
+
+
+# Back-compat aliases used by tests that pre-date the factory refactor.
+# These are re-created at import time so they are fresh instances.
+_XATTR_REC = _xattr_rec()
+_CRASH_REC = _crash_rec()
+_FSEVENT_REC = _fsevent_rec()
 
 
 # ---------------------------------------------------------------------------
@@ -162,11 +180,39 @@ class TestSharedDomainRule:
         assert _DOM in sd[0].related_iocs
 
     def test_wording_avoids_certainty(self):
-        findings = correlate([_XATTR_REC, _CRASH_REC])
+        findings = correlate([_xattr_rec(), _crash_rec()])
         sd = [f for f in findings if f.correlation_type == "shared_domain"]
         text = sd[0].summary + sd[0].rationale
         assert "possibly" in text or "correlated" in text
-        assert "confirmed" not in text.lower().replace("confirmed IOC", "")
+        assert "confirmed" not in text.lower()
+
+    def test_blocklisted_apple_domain_no_finding(self):
+        a = _r(module="XattrMetadata", domain="apple.com")
+        b = _r(module="CrashReports", domain="apple.com")
+        findings = correlate([a, b])
+        sd = [f for f in findings if f.correlation_type == "shared_domain"]
+        assert len(sd) == 0
+
+    def test_blocklisted_subdomain_no_finding(self):
+        a = _r(module="XattrMetadata", domain="push.apple.com")
+        b = _r(module="CrashReports", domain="push.apple.com")
+        findings = correlate([a, b])
+        sd = [f for f in findings if f.correlation_type == "shared_domain"]
+        assert len(sd) == 0
+
+    def test_blocklisted_cdn_no_finding(self):
+        a = _r(module="XattrMetadata", domain="d1.cloudfront.net")
+        b = _r(module="CrashReports", domain="d1.cloudfront.net")
+        findings = correlate([a, b])
+        sd = [f for f in findings if f.correlation_type == "shared_domain"]
+        assert len(sd) == 0
+
+    def test_non_blocklisted_domain_still_fires(self):
+        a = _r(module="XattrMetadata", domain="malware-c2.io")
+        b = _r(module="CrashReports", domain="malware-c2.io")
+        findings = correlate([a, b])
+        sd = [f for f in findings if f.correlation_type == "shared_domain"]
+        assert len(sd) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +277,23 @@ class TestSharedPathRule:
         sp = [f for f in findings if f.correlation_type == "shared_path"]
         assert len(sp) == 0
 
+    def test_short_generic_path_no_finding(self):
+        # "var" and "tmp" normalize to < 10 chars — too generic to correlate
+        for generic in ("/var", "/tmp", "/usr", "/System", "/private"):
+            a = _r(module="FSEvents", path=generic)
+            b = _r(module="CrashReports", path=generic)
+            findings = correlate([a, b])
+            sp = [f for f in findings if f.correlation_type == "shared_path"]
+            assert len(sp) == 0, f"Unexpected finding for generic path: {generic}"
+
+    def test_specific_path_still_fires(self):
+        specific = "/private/var/mobile/Downloads/implant.dylib"
+        a = _r(module="FSEvents", path=specific)
+        b = _r(module="CrashReports", path=specific)
+        findings = correlate([a, b])
+        sp = [f for f in findings if f.correlation_type == "shared_path"]
+        assert len(sp) == 1
+
 
 # ---------------------------------------------------------------------------
 # ioc_temporal_cluster rule
@@ -268,6 +331,27 @@ class TestIocTemporalCluster:
         tc = [f for f in findings if f.correlation_type == "ioc_temporal_cluster"]
         # Only 1 record has a valid timestamp → no cluster of ≥2
         assert len(tc) == 0
+
+    def test_malformed_timestamp_excluded(self):
+        # Non-empty but unparseable timestamp must not be treated as a valid time
+        bad_ts = _r(module="ModA", matched_ioc="evil.org", timestamp="not-a-date")
+        good_ts = _r(
+            module="ModB",
+            matched_ioc="evil.org",
+            timestamp="2024-01-15 10:00:00.000000",
+        )
+        findings = correlate([bad_ts, good_ts], time_window_minutes=60)
+        tc = [f for f in findings if f.correlation_type == "ioc_temporal_cluster"]
+        assert len(tc) == 0
+
+    def test_wording_avoids_certainty(self):
+        r1 = _r(module="A", matched_ioc="x", timestamp="2024-01-15 10:00:00.000000")
+        r2 = _r(module="B", matched_ioc="y", timestamp="2024-01-15 10:05:00.000000")
+        findings = correlate([r1, r2], time_window_minutes=10)
+        tc = [f for f in findings if f.correlation_type == "ioc_temporal_cluster"]
+        text = tc[0].summary + tc[0].rationale
+        assert "possibly" in text or "correlated" in text
+        assert "confirmed" not in text.lower()
 
     def test_three_consecutive_ioc_hits_one_cluster(self):
         r1 = _r(module="A", matched_ioc="x", timestamp="2024-01-15 10:00:00.000000")
@@ -339,6 +423,25 @@ class TestIocFileProximity:
         fp = [f for f in findings if f.correlation_type == "ioc_file_proximity"]
         assert len(fp) == 0
 
+    def test_ioc_fsevent_does_not_self_correlate(self):
+        """An IOC-matched FSEvent must not appear as a nearby record for itself."""
+        ioc_fsevent = _r(
+            module="FSEvents",
+            artifact_type="fsevent",
+            matched_ioc="evil.org",
+            timestamp="2024-01-15 10:00:00.000000",
+        )
+        other_fsevent = _r(
+            module="FSEvents",
+            artifact_type="fsevent",
+            timestamp="2024-01-15 10:02:00.000000",
+        )
+        findings = correlate([ioc_fsevent, other_fsevent], time_window_minutes=10)
+        fp = [f for f in findings if f.correlation_type == "ioc_file_proximity"]
+        assert len(fp) == 1
+        # related_records: [ioc_fsevent, other_fsevent] — exactly 2, not 3
+        assert len(fp[0].related_records) == 2
+
     def test_finding_severity_high_confidence_medium(self):
         findings = correlate([_CRASH_REC, _FSEVENT_REC], time_window_minutes=10)
         fp = [f for f in findings if f.correlation_type == "ioc_file_proximity"]
@@ -364,9 +467,12 @@ class TestCorrelateEdgeCases:
         assert correlate([_XATTR_REC]) == []
 
     def test_all_rules_fire_together(self):
-        # _XATTR_REC and _CRASH_REC share domain + url; both have matched_ioc;
-        # _FSEVENT_REC is close in time to _CRASH_REC
-        findings = correlate([_XATTR_REC, _CRASH_REC, _FSEVENT_REC], time_window_minutes=30)
+        # xattr + crash share domain + url; both have matched_ioc;
+        # fsevent is close in time to crash
+        findings = correlate(
+            [_xattr_rec(), _crash_rec(), _fsevent_rec()],
+            time_window_minutes=30,
+        )
         types = {f.correlation_type for f in findings}
         assert "shared_domain" in types
         assert "shared_url" in types

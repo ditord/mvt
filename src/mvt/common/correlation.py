@@ -43,6 +43,40 @@ from typing import Dict, List, Optional
 from .normalized_timeline import NormalizedTimelineRecord
 
 # ---------------------------------------------------------------------------
+# Domain blocklist — high-volume infrastructure seen on virtually every
+# iOS device.  Domains whose presence in two modules is essentially
+# guaranteed and carries no forensic signal are excluded from shared_domain
+# correlations to prevent near-certain false positives.
+# ---------------------------------------------------------------------------
+
+_BLOCKLISTED_DOMAINS: frozenset = frozenset({
+    # Apple infrastructure
+    "apple.com",
+    "icloud.com",
+    "mzstatic.com",
+    "cdn-apple.com",
+    "apple-mapkit.com",
+    # CDN / cloud providers commonly embedded in crash text or xattr origins
+    "akamaized.net",
+    "akamai.com",
+    "cloudfront.net",
+    "amazonaws.com",
+    "fastly.net",
+    "cloudflare.com",
+    "cloudflare-dns.com",
+    "googleapis.com",
+    "gstatic.com",
+    "googleusercontent.com",
+    "microsoft.com",
+    "windows.com",
+})
+
+# Minimum character length of a normalized path (leading '/' stripped) required
+# before shared_path fires.  Paths shorter than this are too generic (e.g.
+# "var", "tmp", "usr", "System", "private") to produce actionable findings.
+_MIN_NORMALIZED_PATH_LEN: int = 10
+
+# ---------------------------------------------------------------------------
 # Timestamp parsing
 # ---------------------------------------------------------------------------
 
@@ -125,7 +159,15 @@ def _r2d(r: NormalizedTimelineRecord) -> dict:
 
 
 def _normalize_path(p: str) -> str:
-    return p.lstrip("/")
+    """Strip leading '/' and return empty string for paths too generic to correlate."""
+    normalized = p.lstrip("/")
+    return normalized if len(normalized) >= _MIN_NORMALIZED_PATH_LEN else ""
+
+
+def _is_blocklisted_domain(domain: str) -> bool:
+    """Return True if *domain* is high-volume infrastructure not worth correlating."""
+    d = domain.lower()
+    return any(d == b or d.endswith("." + b) for b in _BLOCKLISTED_DOMAINS)
 
 
 def _ioc_wording(has_ioc: bool) -> str:
@@ -143,10 +185,16 @@ def _rule_shared_value(
     correlation_type: str,
     label: str,
     key_fn=None,
+    skip_fn=None,
 ) -> List[CorrelationFinding]:
     """
     Generic rule: group records by attr value; emit one finding per value
     that appears across ≥2 distinct modules.
+
+    key_fn  : optional transform applied to the raw attribute value before
+               grouping (e.g. _normalize_path strips leading '/').
+    skip_fn : optional predicate — if it returns True for the grouped key,
+               the finding is suppressed (e.g. _is_blocklisted_domain).
     """
     if key_fn is None:
         key_fn = lambda v: v
@@ -160,6 +208,8 @@ def _rule_shared_value(
 
     findings: List[CorrelationFinding] = []
     for val, recs in groups.items():
+        if skip_fn is not None and skip_fn(val):
+            continue
         modules = {r.module for r in recs}
         if len(modules) < 2:
             continue
@@ -190,7 +240,10 @@ def _rule_shared_value(
 
 
 def _rule_shared_domain(records: List[NormalizedTimelineRecord]) -> List[CorrelationFinding]:
-    return _rule_shared_value(records, "domain", "shared_domain", "domain")
+    return _rule_shared_value(
+        records, "domain", "shared_domain", "domain",
+        skip_fn=_is_blocklisted_domain,
+    )
 
 
 def _rule_shared_url(records: List[NormalizedTimelineRecord]) -> List[CorrelationFinding]:
@@ -251,7 +304,7 @@ def _rule_ioc_temporal_cluster(
                 f"({ts_start} – {ts_end})"
             ),
             rationale=(
-                f"Multiple confirmed IOC hits were observed across modules "
+                f"Multiple IOC-matched records were observed across modules "
                 f"({', '.join(modules)}) within a {window_label} window. "
                 "Temporal proximity may indicate coordinated activity but does "
                 "not confirm compromise."
@@ -290,7 +343,8 @@ def _rule_ioc_file_proximity(
     for ioc_rec in ioc_recs:
         nearby = [
             fs for fs in fsevent_recs
-            if _within_window(ioc_rec.timestamp, fs.timestamp, window_minutes)
+            if fs is not ioc_rec
+            and _within_window(ioc_rec.timestamp, fs.timestamp, window_minutes)
         ]
         if not nearby:
             continue
