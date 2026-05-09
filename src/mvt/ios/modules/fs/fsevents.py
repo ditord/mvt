@@ -14,6 +14,7 @@ from mvt.common.module_types import (
     ModuleResults,
     ModuleSerializedResult,
 )
+from mvt.common.normalized_timeline import NormalizedTimelineMixin, NormalizedTimelineRecord
 from mvt.common.utils import convert_unix_to_iso
 
 from ..base import IOSExtraction
@@ -109,7 +110,7 @@ def _decode_flags(flags_raw: int) -> list:
 # ---------------------------------------------------------------------------
 
 
-class FSEvents(IOSExtraction):
+class FSEvents(NormalizedTimelineMixin, IOSExtraction):
     """Parse FSEvents binary log files from .fseventsd directories in a full
     iOS filesystem dump.
 
@@ -179,6 +180,17 @@ class FSEvents(IOSExtraction):
                 f"(source: {record['source_log_file']})"
             ),
         }
+
+    def normalize_record(self, result: dict) -> NormalizedTimelineRecord:
+        flags_str = ", ".join(result.get("flags_decoded") or []) or "none"
+        return NormalizedTimelineRecord(
+            timestamp=result.get("timestamp", ""),
+            module=self.__class__.__name__,
+            artifact_type="fsevent",
+            path=result.get("path", ""),
+            description=f"{flags_str} (event_id={result.get('event_id', '')})",
+            source_file=result.get("source_log_file", ""),
+        )
 
     def check_indicators(self) -> None:
         if not self.indicators:

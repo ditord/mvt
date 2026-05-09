@@ -16,6 +16,7 @@ from mvt.common.module_types import (
     ModuleResults,
     ModuleSerializedResult,
 )
+from mvt.common.normalized_timeline import NormalizedTimelineMixin, NormalizedTimelineRecord
 from mvt.common.utils import convert_unix_to_iso
 
 from ..base import IOSExtraction
@@ -86,7 +87,7 @@ def _decode_xattr(attr_name: str, raw: bytes) -> object:
     return raw.hex()
 
 
-class XattrMetadata(IOSExtraction):
+class XattrMetadata(NormalizedTimelineMixin, IOSExtraction):
     """Extract filesystem extended attributes from a full iOS filesystem dump.
 
     Targets com.apple.quarantine and com.apple.metadata:* xattrs, which can
@@ -119,6 +120,24 @@ class XattrMetadata(IOSExtraction):
             "event": "xattr_metadata",
             "data": f"{record['file_path']} [{record['attribute_name']}]",
         }
+
+    def normalize_record(self, result: dict) -> NormalizedTimelineRecord:
+        urls: list = result.get("extracted_urls", [])
+        domains: list = result.get("extracted_domains", [])
+        decoded = result.get("decoded_value", "")
+        decoded_str = str(decoded)
+        if len(decoded_str) > 120:
+            decoded_str = decoded_str[:117] + "..."
+        return NormalizedTimelineRecord(
+            timestamp=result.get("isodate", ""),
+            module=self.__class__.__name__,
+            artifact_type="xattr",
+            path=result.get("file_path", ""),
+            domain=domains[0] if domains else "",
+            url=urls[0] if urls else "",
+            description=f"{result.get('attribute_name', '')}: {decoded_str}",
+            source_file=result.get("file_path", ""),
+        )
 
     def check_indicators(self) -> None:
         if not self.indicators:
