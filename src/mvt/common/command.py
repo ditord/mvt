@@ -195,6 +195,25 @@ class Command:
         for file in generate_hashes_from_path(self.target_path, self.log):
             self.hash_values.append(file)
 
+    def _store_correlations(self) -> None:
+        if not self.results_path:
+            return
+
+        from .correlation import correlate_from_modules, write_correlation_json
+
+        findings = correlate_from_modules(self.executed)
+        if not findings:
+            return
+
+        out_path = os.path.join(self.results_path, "correlation.json")
+        try:
+            write_correlation_json(findings, out_path)
+            self.log.info(
+                "Wrote %d correlation finding(s) to %s", len(findings), out_path
+            )
+        except Exception as exc:
+            self.log.error("Unable to write correlation findings: %s", exc)
+
     def list_modules(self) -> None:
         self.log.info("Following is the list of available %s modules:", self.name)
         for module in self.modules:
@@ -321,3 +340,4 @@ class Command:
         self._store_alerts_timeline()
         self._store_alerts()
         self._store_info()
+        self._store_correlations()
