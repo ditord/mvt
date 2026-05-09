@@ -40,6 +40,7 @@ from mvt.common.help import (
     HELP_MSG_CHECK_SYSDIAGNOSE,
     HELP_MSG_DISABLE_UPDATE_CHECK,
     HELP_MSG_DISABLE_INDICATOR_UPDATE_CHECK,
+    HELP_MSG_GENERATE_REPORT,
 )
 from .cmd_check_backup import CmdIOSCheckBackup
 from .cmd_check_fs import CmdIOSCheckFS
@@ -390,6 +391,49 @@ def check_iocs(ctx, iocs, list_modules, module, folder):
     cmd.run()
     cmd.show_alerts_brief()
     cmd.show_support_message()
+
+
+# ==============================================================================
+# Command: generate-report
+# ==============================================================================
+@cli.command(
+    "generate-report",
+    context_settings=CONTEXT_SETTINGS,
+    help=HELP_MSG_GENERATE_REPORT,
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Folder for the generated report files (defaults to INPUT_DIR)",
+)
+@click.option("--case-id", "-c", default="", help="Case identifier string")
+@click.option("--analyst", "-a", default="", help="Analyst name")
+@click.option(
+    "--format",
+    "-F",
+    "fmt",
+    type=click.Choice(["json", "md", "both"], case_sensitive=False),
+    default="json",
+    show_default=True,
+    help="Output format: json, md, or both",
+)
+@click.argument("INPUT_DIR", type=click.Path(exists=True, file_okay=False))
+def generate_report(output_dir, case_id, analyst, fmt, input_dir):
+    from .report import CaseReport
+
+    report = CaseReport(input_dir=input_dir, case_id=case_id, analyst=analyst)
+    out = output_dir or input_dir
+    os.makedirs(out, exist_ok=True)
+
+    summary = report.build()
+
+    if fmt in ("json", "both"):
+        report.save_json(os.path.join(out, "case_summary.json"), summary=summary)
+
+    if fmt in ("md", "both"):
+        report.save_markdown(os.path.join(out, "case_summary.md"), summary=summary)
 
 
 # ==============================================================================

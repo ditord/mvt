@@ -34,6 +34,12 @@ HELP_MSG_EXTRACT_KEY = "Extract decryption key from an iTunes backup"
 HELP_MSG_CHECK_IOS_BACKUP = "Extract artifacts from an iTunes backup"
 HELP_MSG_CHECK_FS = "Extract artifacts from a full filesystem dump"
 HELP_MSG_CHECK_SYSDIAGNOSE = "Extract artifacts from an iOS sysdiagnose archive or directory"
+HELP_MSG_GENERATE_REPORT = (
+    "Generate a case summary report from an MVT output directory. "
+    "Reads alerts.json, correlation.json, module result files, and "
+    "normalized timelines, then writes case_summary.json and/or "
+    "case_summary.md to the output folder."
+)
 
 # Android Specific
 HELP_MSG_ANDROID_BACKUP_PASSWORD = "The backup password to use for an Android backup"
