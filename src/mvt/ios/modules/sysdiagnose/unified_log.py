@@ -11,6 +11,7 @@ does NOT rule out compromise — this module has significant coverage gaps
 compared to what a full tracev3 parser would provide.
 """
 
+import datetime
 import json
 import logging
 import os
@@ -96,8 +97,6 @@ def _normalize_timestamp(ts: str) -> str:
 
     `log show` emits timestamps as "2024-01-15 10:23:41.000000-0800".
     """
-    import datetime
-
     if not ts:
         return ""
     for fmt in (
@@ -229,8 +228,17 @@ class UnifiedLog(NormalizedTimelineMixin, SysdiagnoseModule):
     # ------------------------------------------------------------------
 
     def _make_cmd(self, logarchive_path: str) -> List[str]:
-        """Build the `log show` argument list.  No shell=True."""
-        assert _LOG_BINARY is not None  # guarded in run()
+        """Build the `log show` argument list.  No shell=True.
+
+        Raises RuntimeError if _LOG_BINARY is None.  In normal flow this is
+        prevented by the guard in run(); the explicit check here covers direct
+        calls and survives ``python -O`` (which silences assertions).
+        """
+        if _LOG_BINARY is None:
+            raise RuntimeError(
+                "Cannot construct 'log show' command: the 'log' binary is not "
+                "available on this platform or was not found on PATH."
+            )
         return [
             _LOG_BINARY,
             "show",
@@ -257,13 +265,9 @@ class UnifiedLog(NormalizedTimelineMixin, SysdiagnoseModule):
         for raw_line in stream:
             buf += raw_line
 
-            # Cap buffer to avoid runaway memory use
-            if len(buf) > 8 * 1024 * 1024:
-                last_brace = buf.rfind("{")
-                buf = buf[last_brace:] if last_brace != -1 else ""
-                continue
-
-            # Greedily consume complete JSON objects from the front of the buffer
+            # Greedily consume complete JSON objects from the front of the buffer.
+            # The cap check comes *after* draining so that events that are already
+            # parseable are never discarded by the truncation branch.
             while True:
                 buf = buf.lstrip()
                 if not buf:
@@ -287,6 +291,13 @@ class UnifiedLog(NormalizedTimelineMixin, SysdiagnoseModule):
                     emitted += 1
                     if emitted >= self.max_events:
                         return
+
+            # Cap the *remaining unparsed* buffer after draining.  This guards
+            # against a single pathological line (e.g. eventMessage carrying
+            # megabytes of base64) without discarding already-parseable events.
+            if len(buf) > 8 * 1024 * 1024:
+                last_brace = buf.rfind("{")
+                buf = buf[last_brace:] if last_brace != -1 else ""
 
     def _build_result(self, event: dict, source_logarchive: str) -> dict:
         """Convert a raw `log show` event dict into an MVT result dict."""
@@ -337,6 +348,16 @@ class UnifiedLog(NormalizedTimelineMixin, SysdiagnoseModule):
             for event in self._iter_events(proc.stdout):
                 self.results.append(self._build_result(event, source_name))
         finally:
+            ingested = len(self.results) - count_before
+            # When the event cap was hit the generator returned early, but the
+            # subprocess is likely still streaming output.  Kill it now so that
+            # proc.communicate() does not block reading potentially hundreds of
+            # MB of remaining JSON before the timeout fires.
+            if ingested >= self.max_events:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass  # already exited
             try:
                 _, stderr = proc.communicate(timeout=self.timeout)
                 if stderr:
@@ -350,7 +371,6 @@ class UnifiedLog(NormalizedTimelineMixin, SysdiagnoseModule):
                     source_name,
                 )
 
-        ingested = len(self.results) - count_before
         self.log.info("Extracted %d event(s) from %s", ingested, source_name)
         if ingested >= self.max_events:
             self.log.warning(

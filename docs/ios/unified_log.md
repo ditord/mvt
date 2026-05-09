@@ -47,13 +47,15 @@ to parse the binary log format directly.
    log show --style json --archive <path> --info --debug
    ```
 
-   No `shell=True` is used.  The subprocess is killed if it exceeds the
-   configured timeout (default: 120 seconds).
+   No `shell=True` is used.  The subprocess is killed when the event cap is
+   reached (so the pipe does not block on remaining output) and also when the
+   configured timeout expires (default: 120 seconds).
 
 4. **Streaming parse** — The JSON array output is parsed incrementally
-   using `json.JSONDecoder.raw_decode()` so the full output is never loaded
-   into memory at once.  Processing stops after `max_events` events
-   (default: 5 000).
+   using `json.JSONDecoder.raw_decode()` so the full JSON array is never
+   loaded into memory at once.  A rolling 8 MB buffer cap guards against
+   pathological single-line messages.  Processing stops after `max_events`
+   events (default: 5 000).
 
 5. **Field extraction** — For each event, MVT extracts:
 

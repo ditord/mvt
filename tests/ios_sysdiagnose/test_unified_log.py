@@ -273,6 +273,72 @@ class TestLogarchiveDiscoveryTar:
 
 
 # ---------------------------------------------------------------------------
+# 2c. Path traversal guard in _extract_logarchive_from_tar
+# ---------------------------------------------------------------------------
+
+
+class TestTarExtractPathTraversal:
+    def test_path_traversal_member_is_skipped(self, tmp_path):
+        """Members with '../' traversal in their name must not escape extract_dir."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            # One legitimate member
+            good_data = b"normal"
+            good_info = tarfile.TarInfo("sys.logarchive/Persist/ok.tracev3")
+            good_info.size = len(good_data)
+            good_info.mtime = int(time.time())
+            tf.addfile(good_info, io.BytesIO(good_data))
+
+            # A traversal attempt — four levels of ".." escape the logarchive
+            # and the extract dir entirely.
+            evil_data = b"evil"
+            evil_info = tarfile.TarInfo("sys.logarchive/../../../../escape.bin")
+            evil_info.size = len(evil_data)
+            evil_info.mtime = int(time.time())
+            tf.addfile(evil_info, io.BytesIO(evil_data))
+
+        extract_dir = str(tmp_path / "extract")
+        os.makedirs(extract_dir)
+
+        buf.seek(0)
+        with tarfile.open(fileobj=buf, mode="r:gz") as open_tar:
+            m = UnifiedLog()
+            m.tar_archive = open_tar
+            result = m._extract_logarchive_from_tar("sys.logarchive", extract_dir)
+
+        assert result is not None  # extraction succeeded for the safe member
+        # No file named 'escape.bin' should exist anywhere in or above extract_dir
+        for dirpath, _dirs, files in os.walk(tmp_path):
+            assert "escape.bin" not in files, (
+                f"Traversal file written to {dirpath}"
+            )
+
+    def test_safe_member_is_extracted(self, tmp_path):
+        """A member with a legitimate relative path inside the archive is extracted."""
+        buf = io.BytesIO()
+        data = b"persist data"
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            info = tarfile.TarInfo("sys.logarchive/Persist/0001.tracev3")
+            info.size = len(data)
+            info.mtime = int(time.time())
+            tf.addfile(info, io.BytesIO(data))
+
+        extract_dir = str(tmp_path / "extract")
+        os.makedirs(extract_dir)
+
+        buf.seek(0)
+        with tarfile.open(fileobj=buf, mode="r:gz") as open_tar:
+            m = UnifiedLog()
+            m.tar_archive = open_tar
+            result = m._extract_logarchive_from_tar("sys.logarchive", extract_dir)
+
+        assert result is not None
+        expected = os.path.join(extract_dir, "sys.logarchive", "Persist", "0001.tracev3")
+        assert os.path.isfile(expected)
+        assert open(expected, "rb").read() == data
+
+
+# ---------------------------------------------------------------------------
 # 3. macOS backend — command construction
 # ---------------------------------------------------------------------------
 
@@ -299,6 +365,17 @@ class TestBackendCommand:
         # Path must be a single list element — no shell expansion possible
         assert path in cmd
         assert len([c for c in cmd if ";" in c]) == 1  # only in the path element
+
+    def test_make_cmd_raises_when_no_binary(self):
+        """_make_cmd must raise RuntimeError when _LOG_BINARY is None.
+
+        Using assert would be silently disabled by python -O; the explicit
+        RuntimeError ensures the guard survives all optimization levels.
+        """
+        with patch(f"{_MODULE}._LOG_BINARY", None):
+            m = UnifiedLog()
+            with pytest.raises(RuntimeError):
+                m._make_cmd("/some/path.logarchive")
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +413,13 @@ class TestIterEvents:
     def test_empty_array_yields_nothing(self):
         m = UnifiedLog()
         events = list(m._iter_events(io.StringIO("[]")))
+        assert events == []
+
+    def test_entirely_malformed_output_yields_nothing(self):
+        """A stream of complete garbage (no valid JSON objects) yields nothing."""
+        garbage = "this is not json at all\nneither is this\n!@#$%^&*()\n"
+        m = UnifiedLog()
+        events = list(m._iter_events(io.StringIO(garbage)))
         assert events == []
 
     def test_build_result_fields(self):
@@ -376,10 +460,10 @@ class TestIterEvents:
 
 class TestIOCIntegration:
     def test_no_indicators_no_alerts(self):
-        m = UnifiedLog(results=[m := UnifiedLog()._build_result(_EVENT_BENIGN, "x")])
-        m2 = UnifiedLog(results=[UnifiedLog()._build_result(_EVENT_BENIGN, "x")])
-        m2.check_indicators()
-        assert len(m2.alertstore.alerts) == 0
+        result = UnifiedLog()._build_result(_EVENT_BENIGN, "x")
+        m = UnifiedLog(results=[result])
+        m.check_indicators()
+        assert len(m.alertstore.alerts) == 0
 
     def test_url_ioc_match(self, indicator_file):
         result = UnifiedLog()._build_result(_EVENT_MALICIOUS, "test.logarchive")
