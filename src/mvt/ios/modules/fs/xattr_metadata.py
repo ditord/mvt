@@ -138,10 +138,12 @@ class XattrMetadata(NormalizedTimelineMixin, IOSExtraction):
             module=self.__class__.__name__,
             artifact_type="xattr",
             path=result.get("file_path", ""),
+            event_type=result.get("attribute_name", ""),
             domain=domains[0] if domains else "",
             url=urls[0] if urls else "",
             description=f"{result.get('attribute_name', '')}: {decoded_str}",
             source_file=result.get("file_path", ""),
+            raw=dict(result),
         )
 
     def check_indicators(self) -> None:

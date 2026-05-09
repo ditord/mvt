@@ -72,13 +72,17 @@ class TestNormalizedTimelineRecord:
         r = NormalizedTimelineRecord()
         for field in (
             "timestamp", "module", "artifact_type", "path", "process",
-            "domain", "url", "description", "matched_ioc", "source_file",
+            "bundle_id", "domain", "url", "event_type", "description",
+            "matched_ioc", "source_file", "raw",
         ):
             assert hasattr(r, field)
 
     def test_defaults_are_empty_strings(self):
         r = NormalizedTimelineRecord()
-        assert all(v == "" for v in asdict(r).values())
+        d = asdict(r)
+        string_fields = {k: v for k, v in d.items() if k != "raw"}
+        assert all(v == "" for v in string_fields.values())
+        assert d["raw"] is None
 
     def test_fields_set_correctly(self):
         r = NormalizedTimelineRecord(
@@ -86,10 +90,20 @@ class TestNormalizedTimelineRecord:
             module="TestModule",
             artifact_type="test",
             path="/foo/bar",
+            bundle_id="com.example.app",
+            event_type="crash_report",
         )
         assert r.timestamp == "2024-01-01 00:00:00.000000"
         assert r.module == "TestModule"
         assert r.path == "/foo/bar"
+        assert r.bundle_id == "com.example.app"
+        assert r.event_type == "crash_report"
+
+    def test_raw_field_stores_original_dict(self):
+        payload = {"key": "value", "count": 42}
+        r = NormalizedTimelineRecord(raw=payload)
+        assert r.raw == payload
+        assert asdict(r)["raw"] == payload
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +141,25 @@ class TestWriteJsonl:
         for line in out.read_text().strip().splitlines():
             obj = json.loads(line)
             assert "timestamp" in obj
+
+    def test_raw_field_serialized_as_object(self, tmp_path):
+        records = [
+            NormalizedTimelineRecord(
+                timestamp="2024-01-01",
+                raw={"path": "/tmp/foo", "flags": ["Created"]},
+            )
+        ]
+        out = tmp_path / "out.jsonl"
+        write_jsonl(records, str(out))
+        obj = json.loads(out.read_text().strip())
+        assert obj["raw"] == {"path": "/tmp/foo", "flags": ["Created"]}
+
+    def test_raw_none_serialized_as_null(self, tmp_path):
+        records = [NormalizedTimelineRecord(timestamp="2024-01-01")]
+        out = tmp_path / "out.jsonl"
+        write_jsonl(records, str(out))
+        obj = json.loads(out.read_text().strip())
+        assert obj["raw"] is None
 
     def test_empty_records_writes_empty_file(self, tmp_path):
         out = tmp_path / "out.jsonl"
@@ -235,12 +268,16 @@ class TestFSEventsNormalizer:
         assert r.process == ""
         assert r.domain == ""
         assert r.url == ""
+        assert r.bundle_id == ""
+        assert "Created" in r.event_type
+        assert r.raw == _FSEVENTS_RESULT
 
     def test_normalize_record_empty_flags(self):
         result = dict(_FSEVENTS_RESULT, flags_decoded=[])
         m = FSEvents(results=[result])
         r = m.normalize_record(result)
         assert "none" in r.description
+        assert r.event_type == "none"
 
     def test_to_normalized_timeline_count(self):
         results = [_FSEVENTS_RESULT, dict(_FSEVENTS_RESULT, path="/other/path")]
@@ -273,6 +310,9 @@ class TestXattrMetadataNormalizer:
         assert "kMDItemWhereFroms" in r.description
         assert r.source_file == "private/var/mobile/Downloads/payload.dmg"
         assert r.process == ""
+        assert r.bundle_id == ""
+        assert r.event_type == "com.apple.metadata:kMDItemWhereFroms"
+        assert r.raw == _XATTR_RESULT
 
     def test_normalize_record_no_urls(self):
         result = dict(_XATTR_RESULT, extracted_urls=[], extracted_domains=[])
@@ -325,6 +365,15 @@ class TestCrashReportsNormalizer:
         assert "watchdog timeout" in r.description
         assert r.domain == ""
         assert r.url == ""
+        assert r.bundle_id == "com.apple.springboard"
+        assert "EXC_CRASH" in r.event_type
+        assert r.raw == _CRASH_RESULT
+
+    def test_normalize_record_no_exception_event_type_fallback(self):
+        result = dict(_CRASH_RESULT, exception_type="", exception_signal="")
+        m = CrashReports(results=[result])
+        r = m.normalize_record(result)
+        assert r.event_type == "crash_report"
 
     def test_normalize_record_with_url(self):
         result = dict(

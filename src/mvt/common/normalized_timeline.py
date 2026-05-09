@@ -37,18 +37,21 @@ class NormalizedTimelineRecord:
     artifact_type: str = ""
     path: str = ""
     process: str = ""
+    bundle_id: str = ""
     domain: str = ""
     url: str = ""
+    event_type: str = ""
     description: str = ""
     matched_ioc: str = ""
     source_file: str = ""
+    raw: Optional[dict] = None
 
 
 def write_jsonl(records: List[NormalizedTimelineRecord], path: str) -> None:
     """Write records to a JSONL file, sorted by timestamp."""
     with open(path, "w", encoding="utf-8") as fh:
         for record in sorted(records, key=lambda r: r.timestamp or ""):
-            fh.write(json.dumps(asdict(record), ensure_ascii=False))
+            fh.write(json.dumps(asdict(record), ensure_ascii=False, default=str))
             fh.write("\n")
 
 

@@ -188,8 +188,10 @@ class FSEvents(NormalizedTimelineMixin, IOSExtraction):
             module=self.__class__.__name__,
             artifact_type="fsevent",
             path=result.get("path", ""),
+            event_type=flags_str,
             description=f"{flags_str} (event_id={result.get('event_id', '')})",
             source_file=result.get("source_log_file", ""),
+            raw=dict(result),
         )
 
     def check_indicators(self) -> None:

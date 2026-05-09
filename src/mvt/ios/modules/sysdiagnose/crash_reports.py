@@ -226,10 +226,13 @@ class CrashReports(NormalizedTimelineMixin, SysdiagnoseModule):
             artifact_type="crash_report",
             path=result.get("process_path", ""),
             process=result.get("process_name", ""),
+            bundle_id=result.get("bundle_identifier", ""),
             domain=domains[0] if domains else "",
             url=urls[0] if urls else "",
+            event_type=exc_str or "crash_report",
             description=" | ".join(p for p in desc_parts if p),
             source_file=result.get("source_file", ""),
+            raw=dict(result),
         )
 
     def check_indicators(self) -> None:
